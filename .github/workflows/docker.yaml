@@ -1,0 +1,67 @@
+name: Docker Build & Push
+
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  docker:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Prepare metadata
+        id: meta
+        run: |
+          IMAGE_NAME=fuxatech/pg-s3-backup
+          TAGS=""
+          VERSION_SUFFIX="docker"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+            TAGS="${IMAGE_NAME}:${VERSION},${IMAGE_NAME}:latest"
+            VERSION_SUFFIX="none"
+          elif [[ "${GITHUB_REF_TYPE}" == "branch" ]]; then
+            VERSION="stable"
+            VERSION_SUFFIX="docker.${{ github.run_number }}"
+            TAGS="${IMAGE_NAME}:${VERSION}"
+          elif [[ "${GITHUB_REF_TYPE}" == "pull_request" ]]; then
+            VERSION="pr-${{ github.event.number }}"
+            VERSION_SUFFIX="pr.${{ github.event.number }}"
+            TAGS="${IMAGE_NAME}:${VERSION}"
+          fi
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "versionsuffix=${VERSION_SUFFIX}" >> $GITHUB_OUTPUT
+          echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VERSIONSUFFIX=${{ steps.meta.outputs.versionsuffix }}
